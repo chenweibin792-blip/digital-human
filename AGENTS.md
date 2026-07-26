@@ -35,6 +35,10 @@ E:\SZR\.conda\envs\livetalking-local\python.exe -m unittest tests.test_edge_tts_
 - Never commit `.env`, API keys, model weights, generated avatar caches, audio,
   video, logs or temporary files.
 - Make the smallest maintainable change and test after every modification.
+- **Git commits are NOT save points.** Do not commit after every trivial edit.
+  Batch related changes into a single logical commit. Test FIRST, commit AFTER.
+  Use `git stash` for work-in-progress, not WIP commits. See `GIT_WORKFLOW.md`
+  for full commit discipline rules and recovery procedures.
 - Preserve existing features and keep default concurrency at one.
 - New local dependencies, caches and temporary files for this checkout belong
   under `E:\SZR`, not C:.
