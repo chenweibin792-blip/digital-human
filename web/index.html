@@ -1,416 +1,645 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveTalking - 数字人实时驱动</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>LiveTalking 本地实时数字人</title>
+    <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <style>
         :root {
-            --primary: #4361ee;
-            --primary-dark: #3f37c9;
-            --bg: #f0f4fc;
-            --card-bg: rgba(255,255,255,0.85);
-            --radius: 14px;
+            --canvas:#07111f; --panel:#0e1c2d; --panel-2:#122438;
+            --line:#203850; --text:#eef7ff; --muted:#8aa3b8;
+            --signal:#42e6b4; --signal-dim:#174c45; --amber:#ffbf69;
+            --danger:#ff6b7a; --blue:#6ca8ff; --radius:18px;
         }
+        * { box-sizing:border-box; }
         body {
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);
-            color: #1e293b;
-            min-height: 100vh;
-            padding-bottom: 40px;
+            margin:0; min-height:100vh; color:var(--text);
+            font-family:"Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+            background:
+                radial-gradient(circle at 78% 8%, #12395788, transparent 30rem),
+                linear-gradient(145deg,#06101d,#091827 55%,#07111f);
         }
-        .navbar-brand { font-weight: 700; }
-        .glass-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.4);
-            border-radius: var(--radius);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-            margin-bottom: 20px;
+        button,input,textarea,select { font:inherit; }
+        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible {
+            outline:3px solid #6ca8ff66; outline-offset:2px;
         }
-        .card-header {
-            background: transparent;
-            border-bottom: 1px solid rgba(0,0,0,0.06);
-            padding: 16px 20px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        .topbar {
+            min-height:68px; padding:12px clamp(16px,4vw,48px); display:flex;
+            align-items:center; justify-content:space-between; gap:16px;
+            border-bottom:1px solid var(--line); background:#07111fd9;
+            backdrop-filter:blur(16px); position:sticky; top:0; z-index:20;
         }
-        .card-header i { color: var(--primary); }
-        .card-body { padding: 20px; }
-        .btn-primary-custom {
-            background: linear-gradient(135deg, #4361ee, #3f37c9);
-            border: none;
-            color: #fff;
-            font-weight: 600;
-            border-radius: 8px;
-            padding: 8px 16px;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+        .brand { display:flex; align-items:center; gap:12px; font-weight:750; letter-spacing:.02em; }
+        .brand-mark { width:34px; height:34px; display:grid; place-items:center; color:var(--signal); border:1px solid var(--signal-dim); border-radius:10px; background:#0c2b2a; }
+        .brand small { display:block; color:var(--muted); font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
+        .top-actions { display:flex; align-items:center; gap:10px; }
+        .session { color:var(--muted); font:12px ui-monospace,SFMono-Regular,Consolas,monospace; max-width:190px; overflow:hidden; text-overflow:ellipsis; }
+        .shell { width:min(1500px,100%); margin:auto; padding:22px clamp(14px,3vw,40px) 40px; }
+        .signal-rail {
+            display:grid; grid-template-columns:repeat(5,1fr); gap:1px; overflow:hidden;
+            border:1px solid var(--line); border-radius:14px; background:var(--line); margin-bottom:18px;
         }
-        .btn-primary-custom:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(67,97,238,0.3); color: #fff; }
-        .btn-primary-custom:active { transform: translateY(0); }
-        .btn-danger-custom { background: #ef4444; border: none; color: #fff; font-weight: 600; border-radius: 8px; padding: 8px 16px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
-        .btn-danger-custom:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(239,68,68,0.3); }
-        .btn-danger-custom:active { transform: translateY(0); }
-        .btn-outline-custom { border: 2px solid var(--primary); color: var(--primary); font-weight: 600; border-radius: 8px; padding: 8px 16px; background: transparent; cursor: pointer; transition: all 0.2s; }
-        .btn-outline-custom:hover { background: var(--primary); color: #fff; }
-        .btn-outline-custom:active { transform: scale(0.97); }
-        video { width: 100%; border-radius: 8px; background: #000; }
-        .session-badge { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; }
-        .connected { background: #d1fae5; color: #065f46; }
-        .disconnected { background: #fee2e2; color: #991b1b; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-        .status-dot.on { background: #10b981; }
-        .status-dot.off { background: #ef4444; }
-        .quick-link { text-decoration: none; }
-        .quick-link .glass-card { transition: transform 0.3s, box-shadow 0.3s; cursor: pointer; }
-        .quick-link:hover .glass-card { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(0,0,0,0.1); }
-        pre { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; font-size: 0.8rem; max-height: 120px; overflow-y: auto; }
-        label { font-weight: 500; font-size: 0.9rem; color: #64748b; margin-bottom: 4px; }
-        .param-hint { font-size: 0.75rem; color: #94a3b8; }
-        ::placeholder { color: #9ca3af !important; opacity: 1; }
-        :-ms-input-placeholder { color: #9ca3af; }
+        .signal-step { padding:10px 14px; background:#0b1827; color:#68839a; font-size:12px; white-space:nowrap; }
+        .signal-step.active { color:var(--text); background:#11302f; box-shadow:inset 0 -2px var(--signal); }
+        .signal-step.done { color:#9ddccc; background:#0c2425; }
+        .signal-step i { margin-right:6px; }
+        .workspace { display:grid; grid-template-columns:minmax(420px,1.05fr) minmax(380px,.95fr); gap:18px; align-items:start; }
+        .panel { background:linear-gradient(155deg,#102136ee,#0b1929ee); border:1px solid var(--line); border-radius:var(--radius); box-shadow:0 22px 60px #0005; }
+        .stage-panel { padding:16px; }
+        .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+        .eyebrow { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.14em; }
+        h1,h2,p { margin-top:0; }
+        h1 { font-size:clamp(20px,2vw,29px); margin-bottom:4px; letter-spacing:-.03em; }
+        .state-badge { display:flex; align-items:center; gap:8px; padding:7px 11px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:12px; }
+        .state-dot { width:8px;height:8px;border-radius:50%;background:#587085; }
+        .state-badge.connected .state-dot,.state-badge.speaking .state-dot { background:var(--signal); box-shadow:0 0 0 5px #42e6b422; }
+        .state-badge.working .state-dot { background:var(--amber); animation:pulse 1s infinite; }
+        .state-badge.error .state-dot { background:var(--danger); }
+        @keyframes pulse { 50% { opacity:.35; } }
+        .video-frame {
+            position:relative; width:min(100%,590px); margin:auto; aspect-ratio:3/4;
+            overflow:hidden; border-radius:14px; background:#02070c; border:1px solid #294158;
+        }
+        video { width:100%;height:100%;object-fit:contain;display:block;background:#02070c; }
+        #video {
+            transform-origin:50% 100%;
+            transition:transform .48s cubic-bezier(.2,.8,.2,1),filter .3s;
+            will-change:transform;
+        }
+        #video.pose-crouch { transform:translateY(15%) scaleX(1.035) scaleY(.78); }
+        #video.motion-nod { animation:avatar-nod .9s ease-in-out; }
+        #video.motion-shake { animation:avatar-shake .8s ease-in-out; }
+        #video.motion-bow { animation:avatar-bow 1.2s ease-in-out; }
+        @keyframes avatar-nod {
+            0%,100% { transform:var(--avatar-pose,none); }
+            35% { transform:var(--avatar-pose,none) translateY(2.5%) scaleY(.97); }
+            65% { transform:var(--avatar-pose,none) translateY(-1%); }
+        }
+        @keyframes avatar-shake {
+            0%,100% { transform:var(--avatar-pose,none); }
+            25% { transform:var(--avatar-pose,none) translateX(-2.5%) rotate(-1.4deg); }
+            75% { transform:var(--avatar-pose,none) translateX(2.5%) rotate(1.4deg); }
+        }
+        @keyframes avatar-bow {
+            0%,100% { transform:var(--avatar-pose,none); }
+            45%,65% { transform:var(--avatar-pose,none) translateY(8%) scaleY(.9); filter:brightness(.88); }
+        }
+        .video-empty { position:absolute; inset:0; display:grid; place-items:center; text-align:center; color:var(--muted); padding:24px; pointer-events:none; }
+        .video-empty i { display:block; font-size:42px; color:#294b62; margin-bottom:10px; }
+        .video-frame.has-video .video-empty { display:none; }
+        .video-hud { position:absolute; left:12px; right:12px; bottom:12px; display:flex; justify-content:space-between; gap:8px; pointer-events:none; }
+        .hud-chip { padding:6px 9px; border:1px solid #ffffff1f; border-radius:8px; background:#04111dcc; color:#bcd0df; font:11px ui-monospace,Consolas,monospace; backdrop-filter:blur(8px); }
+        .connect-row { display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:12px; }
+        .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
+        .metric { padding:10px; border:1px solid var(--line); border-radius:11px; background:#091725; }
+        .metric span { display:block; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+        .metric strong { display:block; margin-top:4px; color:var(--signal); font:700 17px ui-monospace,Consolas,monospace; }
+        .latencies { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:10px; color:var(--muted); font:11px ui-monospace,Consolas,monospace; }
+        .latencies strong { color:#c8dbea; }
+        .interaction-panel {
+            margin-top:12px; padding:11px; border:1px solid var(--line);
+            border-radius:12px; background:#091725;
+        }
+        .interaction-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:9px; }
+        .interaction-head strong { font-size:12px; }
+        .action-state { color:var(--signal); font-size:11px; }
+        .quick-actions { display:flex; flex-wrap:wrap; gap:7px; }
+        .quick-action {
+            flex:1 1 76px; padding:8px 9px; border:1px solid #294158;
+            border-radius:9px; color:#cfe1ef; background:#102338; cursor:pointer;
+        }
+        .quick-action:hover:not(:disabled),.quick-action.active { border-color:var(--signal); color:var(--signal); background:#10332f; }
+        .quick-action:disabled { opacity:.45; cursor:not-allowed; }
+        .interaction-hint { margin:8px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+        .conversation-panel { overflow:hidden; }
+        .conversation-head { padding:18px 18px 12px; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+        .conversation-head h2 { font-size:19px; margin-bottom:3px; }
+        .mode-switch { display:grid; grid-template-columns:1fr 1fr; padding:4px; margin:0 18px 12px; border:1px solid var(--line); background:#091725; border-radius:12px; }
+        .mode-switch label { position:relative; }
+        .mode-switch input { position:absolute; opacity:0; }
+        .mode-switch span { display:block; padding:9px 12px; text-align:center; color:var(--muted); border-radius:8px; cursor:pointer; font-size:13px; }
+        .mode-switch input:checked + span { color:#06231e; background:var(--signal); font-weight:750; }
+        .messages { height:310px; overflow:auto; padding:8px 18px 14px; scroll-behavior:smooth; }
+        .empty-history { height:100%; display:grid; place-items:center; text-align:center; color:var(--muted); font-size:13px; }
+        .message { display:flex; gap:9px; margin:10px 0; }
+        .message.user { justify-content:flex-end; }
+        .bubble { max-width:82%; padding:10px 12px; border-radius:13px; background:#172d43; color:#dfeefa; font-size:14px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+        .message.user .bubble { background:#16463f; color:#ecfffa; border-bottom-right-radius:4px; }
+        .message.assistant .bubble { border-bottom-left-radius:4px; }
+        .composer { border-top:1px solid var(--line); padding:14px 18px 18px; }
+        textarea,input,select {
+            width:100%; color:var(--text); background:#081624; border:1px solid #294158;
+            border-radius:10px; padding:10px 12px;
+        }
+        textarea { resize:vertical; min-height:82px; max-height:180px; }
+        ::placeholder { color:#607b91; }
+        .voice-grid { display:grid; grid-template-columns:1.7fr repeat(3,1fr); gap:8px; margin-top:10px; }
+        .field label { display:block; color:var(--muted); font-size:10px; margin:0 0 5px 2px; text-transform:uppercase; letter-spacing:.08em; }
+        .field input,.field select { padding:8px 9px; font-size:12px; }
+        .action-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; margin-top:11px; }
+        .btn { border:1px solid var(--line); border-radius:10px; padding:10px 14px; cursor:pointer; color:var(--text); background:#13283c; transition:transform .15s,background .15s,border-color .15s; white-space:nowrap; }
+        .btn:hover:not(:disabled) { transform:translateY(-1px); border-color:#3f607a; background:#183149; }
+        .btn:disabled { opacity:.48; cursor:not-allowed; }
+        .btn-primary { color:#04241f; background:var(--signal); border-color:var(--signal); font-weight:800; }
+        .btn-primary:hover:not(:disabled) { background:#76f0ca; border-color:#76f0ca; }
+        .btn-danger { color:#ffdce0; border-color:#713443; background:#351923; }
+        .btn-ghost { background:transparent; }
+        .error-box { display:none; margin:0 18px 14px; padding:10px 12px; border:1px solid #713443; border-radius:10px; background:#351923; color:#ffd2d8; font-size:13px; }
+        .error-box.show { display:block; }
+        details.tools { margin-top:18px; }
+        details.tools > summary { cursor:pointer; color:var(--muted); font-size:13px; list-style:none; padding:12px 16px; }
+        details.tools > summary::-webkit-details-marker { display:none; }
+        .tool-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:0 16px 16px; }
+        .tool-card { padding:12px; border:1px solid var(--line); border-radius:12px; background:#091725; }
+        .tool-card h3 { margin:0 0 10px; font-size:13px; }
+        .tool-card input { font-size:12px; padding:8px; margin-bottom:8px; }
+        .links { display:flex; gap:10px; flex-wrap:wrap; padding:0 16px 16px; }
+        .links a { color:#9fc4e0; font-size:12px; text-decoration:none; }
+        .links a:hover { color:var(--signal); }
+        @media (max-width:980px) {
+            .workspace { grid-template-columns:1fr; }
+            .video-frame { max-height:68vh; }
+            .conversation-panel { min-height:620px; }
+        }
+        @media (max-width:600px) {
+            .topbar { align-items:flex-start; }
+            .brand small,.session { display:none; }
+            .signal-rail { grid-template-columns:repeat(5,minmax(86px,1fr)); overflow:auto; }
+            .signal-step { padding:9px; }
+            .metrics { grid-template-columns:1fr 1fr; }
+            .voice-grid { grid-template-columns:1fr 1fr; }
+            .voice-grid .field:first-child { grid-column:1/-1; }
+            .action-row { grid-template-columns:1fr 1fr; }
+            .action-row .btn-primary { grid-column:1/-1; grid-row:1; }
+            .tool-grid { grid-template-columns:1fr; }
+            .messages { height:280px; }
+        }
+        @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
     </style>
 </head>
 <body>
-
-<nav class="navbar navbar-dark" style="background: linear-gradient(135deg, #4361ee, #3f37c9); box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-    <div class="container-fluid px-4">
-        <span class="navbar-brand"><i class="bi bi-camera-video-fill me-2"></i>LiveTalking</span>
-        <a href="/index-en.html" class="text-white-50 small text-decoration-none me-2">English</a>
-        <div class="d-flex gap-2">
-            <span class="session-badge disconnected" id="statusBadge"><span class="status-dot off"></span>未连接</span>
-            <span class="text-white-50 small" id="sessionIdDisplay">SID: -</span>
-        </div>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-mark"><i class="bi bi-broadcast-pin"></i></span>
+        <span>LiveTalking<small>Local avatar studio</small></span>
     </div>
-</nav>
+    <div class="top-actions">
+        <span id="sessionLabel" class="session">SESSION —</span>
+        <a class="btn btn-ghost" href="/tts/index.html" target="_blank" aria-label="打开语音管理"><i class="bi bi-soundwave"></i></a>
+    </div>
+</header>
 
-<div class="container mt-4">
-    <!-- Quick Links -->
-    <div class="row g-3 mb-2">
-        <div class="col-md-3">
-            <a href="/avatar.html" class="quick-link" target="_blank">
-                <div class="glass-card p-3 text-center">
-                    <i class="bi bi-person-bounding-box fs-2" style="color: #4361ee;"></i>
-                    <div class="fw-bold mt-2">Avatar 生成</div>
-                    <div class="small text-muted">创建数字人形象</div>
-                </div>
-            </a>
-        </div>
-        <div class="col-md-3">
-            <a href="/admin.html" class="quick-link" target="_blank">
-                <div class="glass-card p-3 text-center">
-                    <i class="bi bi-speedometer2 fs-2" style="color: #4361ee;"></i>
-                    <div class="fw-bold mt-2">管理后台</div>
-                    <div class="small text-muted">监控会话与配置</div>
-                </div>
-            </a>
-        </div>
-        <div class="col-md-3">
-            <a href="/tts/index.html" class="quick-link" target="_blank">
-                <div class="glass-card p-3 text-center">
-                    <i class="bi bi-soundwave fs-2" style="color: #4361ee;"></i>
-                    <div class="fw-bold mt-2">TTS 语音管理</div>
-                    <div class="small text-muted">语音列表 · 克隆 · 合成</div>
-                </div>
-            </a>
-        </div>
+<main class="shell">
+    <div class="signal-rail" aria-label="处理流程">
+        <div class="signal-step active" data-step="connect"><i class="bi bi-wifi"></i>连接</div>
+        <div class="signal-step" data-step="input"><i class="bi bi-chat-left-text"></i>输入</div>
+        <div class="signal-step" data-step="answer"><i class="bi bi-stars"></i>回答</div>
+        <div class="signal-step" data-step="speech"><i class="bi bi-soundwave"></i>语音</div>
+        <div class="signal-step" data-step="avatar"><i class="bi bi-person-video3"></i>播报</div>
     </div>
 
-    <div class="row">
-        <!-- Left Column: Connection + Video -->
-        <div class="col-lg-7">
-            <!-- 1. WebRTC Connection -->
-            <div class="glass-card">
-                <div class="card-header"><i class="bi bi-broadcast"></i> WebRTC 连接</div>
-                <div class="card-body">
-                    <div class="row g-2 align-items-end mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Avatar ID</label>
-                            <input type="text" class="form-control form-control-sm" id="offerAvatar" placeholder="wav2lip256_avatar1">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">参考音频</label>
-                            <input type="text" class="form-control form-control-sm" id="offerRefAudio" placeholder="zh-CN-YunxiaNeural">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">参考音频文本</label>
-                            <input type="text" class="form-control form-control-sm" id="offerRefText" placeholder="参考文本（可选）">
-                        </div>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button class="btn-primary-custom" id="btnStart" onclick="start()"><i class="bi bi-play-fill"></i> 开始连接</button>
-                        <button class="btn-danger-custom" id="btnStop" onclick="stop()" style="display:none;"><i class="bi bi-stop-fill"></i> 断开连接</button>
-                    </div>
-                    <div id="offerError" class="alert alert-danger mt-3" role="alert" style="display:none;"></div>
-                    <div class="mt-3">
-                        <video id="video" autoplay playsinline muted controls></video>
-                        <audio id="audio" autoplay></audio>
-                    </div>
+    <div class="workspace">
+        <section class="panel stage-panel">
+            <div class="panel-head">
+                <div><div class="eyebrow">实时画面</div><h1>本地数字人演播台</h1></div>
+                <div id="stateBadge" class="state-badge"><span class="state-dot"></span><span id="stateText">未连接</span></div>
+            </div>
+            <div id="videoFrame" class="video-frame">
+                <video id="video" autoplay playsinline muted></video>
+                <audio id="remoteAudio" autoplay></audio>
+                <div class="video-empty"><div><i class="bi bi-person-video3"></i><strong>连接后显示数字人</strong><br><small>默认 Wav2Lip256 · 25 FPS</small></div></div>
+                <div class="video-hud">
+                    <span class="hud-chip">WAV2LIP256</span>
+                    <span id="resolutionHud" class="hud-chip">— × —</span>
                 </div>
             </div>
-        </div>
+            <div class="connect-row">
+                <input id="avatarId" value="wav2lip256_avatar1" aria-label="数字人ID">
+                <button id="connectButton" class="btn btn-primary" type="button"><i class="bi bi-plug-fill"></i> 建立连接</button>
+            </div>
+            <div class="metrics" aria-label="运行指标">
+                <div class="metric"><span>Infer FPS</span><strong id="inferFps">—</strong></div>
+                <div class="metric"><span>Final FPS</span><strong id="finalFps">—</strong></div>
+                <div class="metric"><span>当前显存</span><strong id="gpuMemory">—</strong></div>
+                <div class="metric"><span>峰值显存</span><strong id="gpuPeak">—</strong></div>
+            </div>
+            <div class="latencies" aria-label="延迟与内存">
+                <span>TTS <strong id="ttsLatency">—</strong></span>
+                <span>LLM首字 <strong id="llmLatency">—</strong></span>
+                <span>开口总延迟 <strong id="startLatency">—</strong></span>
+                <span>进程内存 <strong id="processMemory">—</strong></span>
+            </div>
+            <div class="interaction-panel" aria-label="互动动作">
+                <div class="interaction-head">
+                    <strong><i class="bi bi-person-arms-up"></i> 互动动作</strong>
+                    <span id="actionState" class="action-state">站立</span>
+                </div>
+                <div class="quick-actions">
+                    <button class="quick-action" type="button" data-action="crouch" disabled>蹲下</button>
+                    <button class="quick-action" type="button" data-action="stand" disabled>站起来</button>
+                    <button class="quick-action" type="button" data-action="nod" disabled>点头</button>
+                    <button class="quick-action" type="button" data-action="shake" disabled>摇头</button>
+                    <button class="quick-action" type="button" data-action="bow" disabled>鞠躬</button>
+                </div>
+                <p class="interaction-hint">可直接输入“请蹲下”“站起来”或“点点头”。当前为2D视觉动作；接入动作素材后可替换为真实全身动作。</p>
+            </div>
+        </section>
 
-        <!-- Right Column: Drivers + Actions -->
-        <div class="col-lg-5">
-            <!-- 2. Text Driver -->
-            <div class="glass-card">
-                <div class="card-header"><i class="bi bi-chat-text-fill"></i> 文本驱动 (POST /human)</div>
-                <div class="card-body">
-                    <div class="mb-2">
-                        <label class="form-label">输入文本 <span class="param-hint">(type: echo/chat)</span></label>
-                        <textarea class="form-control form-control-sm" id="txtMessage" rows="2" placeholder="输入要播报的文本...">你好，欢迎使用LiveTalking</textarea>
-                    </div>
-                    <div class="d-flex gap-2 align-items-end">
-                        <select class="form-select form-select-sm" style="width:120px;" id="txtType">
-                            <option value="echo">Echo 复读</option>
-                            <option value="chat">Chat LLM</option>
-                        </select>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="txtInterrupt" checked>
-                            <label class="form-check-label small">打断</label>
-                        </div>
-                        <button class="btn-primary-custom btn-sm ms-auto" onclick="sendText()"><i class="bi bi-send"></i> 发送</button>
-                        <button class="btn-outline-custom btn-sm" onclick="interrupt()"><i class="bi bi-stop-circle"></i> 打断</button>
-                    </div>
+        <section class="panel conversation-panel">
+            <div class="conversation-head">
+                <div><div class="eyebrow">当前会话</div><h2>输入一句话，让数字人回答</h2></div>
+                <button id="clearButton" class="btn btn-ghost" type="button" disabled><i class="bi bi-trash3"></i> 清空</button>
+            </div>
+            <div class="mode-switch" role="radiogroup" aria-label="回答模式">
+                <label><input type="radio" name="mode" value="echo" checked><span><i class="bi bi-megaphone"></i> 直接朗读</span></label>
+                <label><input type="radio" name="mode" value="chat"><span><i class="bi bi-stars"></i> AI 回答</span></label>
+            </div>
+            <div id="errorBox" class="error-box" role="alert"></div>
+            <div id="messages" class="messages">
+                <div id="emptyHistory" class="empty-history"><div><i class="bi bi-chat-square-dots fs-3"></i><br>连接后开始对话<br><small>AI回答会保留当前会话的上下文</small></div></div>
+            </div>
+            <div class="composer">
+                <textarea id="messageInput" maxlength="20000" placeholder="输入中文；Ctrl + Enter 发送"></textarea>
+                <div class="voice-grid">
+                    <div class="field"><label for="voice">声音</label><select id="voice"><option>正在读取…</option></select></div>
+                    <div class="field"><label for="rate">语速</label><input id="rate" value="+0%"></div>
+                    <div class="field"><label for="volume">音量</label><input id="volume" value="+0%"></div>
+                    <div class="field"><label for="pitch">音调</label><input id="pitch" value="+0Hz"></div>
+                </div>
+                <div class="action-row">
+                    <button id="sendButton" class="btn btn-primary" type="button" disabled><i class="bi bi-send-fill"></i> 发送</button>
+                    <button id="stopButton" class="btn btn-danger" type="button" disabled><i class="bi bi-stop-fill"></i> 停止说话</button>
+                    <button id="reconnectButton" class="btn" type="button" disabled><i class="bi bi-arrow-repeat"></i> 重连</button>
                 </div>
             </div>
-
-            <!-- 3. Audio Upload -->
-            <div class="glass-card">
-                <div class="card-header"><i class="bi bi-mic-fill"></i> 音频驱动 (POST /humanaudio)</div>
-                <div class="card-body">
-                    <input type="file" class="form-control form-control-sm mb-2" id="audioFile" accept="audio/*">
-                    <button class="btn-primary-custom btn-sm" onclick="uploadAudio()"><i class="bi bi-upload"></i> 上传并播放</button>
-                </div>
-            </div>
-
-            <!-- 4. Recording -->
-            <div class="glass-card">
-                <div class="card-header"><i class="bi bi-record-circle"></i> 录制控制 (POST /record)</div>
-                <div class="card-body">
-                    <div class="d-flex gap-2">
-                        <button class="btn-outline-custom btn-sm" id="btnRecToggle" onclick="toggleRecord()"><i class="bi bi-record-circle"></i> 开始录制</button>
-                        <button class="btn-outline-custom btn-sm" id="btnDownload" onclick="downloadRecord()" disabled><i class="bi bi-download"></i> 下载录像</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 5. Custom State -->
-            <div class="glass-card">
-                <div class="card-header"><i class="bi bi-sliders"></i> 动作编排 (POST /set_audiotype)</div>
-                <div class="card-body">
-                    <div class="row g-2 align-items-end">
-                        <div class="col-6">
-                            <label class="form-label">Audiotype 索引</label>
-                            <input type="number" class="form-control form-control-sm" id="audiotypeVal" value="2" min="2">
-                        </div>
-                        <div class="col-6">
-                            <button class="btn-primary-custom btn-sm w-100" onclick="setAudiotype()"><i class="bi bi-arrow-right-circle"></i> 切换状态</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </div>
+        </section>
     </div>
-</div>
+
+    <details class="panel tools">
+        <summary><i class="bi bi-sliders me-2"></i>原有高级工具：音频上传、录制与动作切换</summary>
+        <div class="tool-grid">
+            <div class="tool-card">
+                <h3>上传音频并驱动</h3>
+                <input id="audioFile" type="file" accept="audio/*">
+                <button id="uploadButton" class="btn" type="button">上传播放</button>
+            </div>
+            <div class="tool-card">
+                <h3>录制当前会话</h3>
+                <button id="recordButton" class="btn" type="button">开始录制</button>
+                <button id="downloadButton" class="btn btn-ghost" type="button" disabled>下载录像</button>
+            </div>
+            <div class="tool-card">
+                <h3>动作编排</h3>
+                <input id="audioType" type="number" min="2" value="2" aria-label="动作索引">
+                <button id="actionButton" class="btn" type="button">切换动作</button>
+            </div>
+        </div>
+        <div class="links">
+            <a href="/avatar.html" target="_blank">Avatar 生成</a>
+            <a href="/admin.html" target="_blank">管理后台</a>
+            <a href="/tts/index.html" target="_blank">EdgeTTS 管理</a>
+            <a href="/index-en.html">English legacy page</a>
+        </div>
+    </details>
+</main>
 
 <script>
-let pc = null;
-let sessionid = null;
+'use strict';
+const ui = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
+const state = { pc:null, sessionid:null, eventSource:null, pollTimer:null, busy:false, recording:false, connected:false, connecting:false, pose:'stand', motionTimer:null };
+const stages = ['connect','input','answer','speech','avatar'];
+const actions = [
+    {id:'crouch',label:'蹲下',keywords:['蹲下去','蹲下来','蹲一下','蹲下']},
+    {id:'stand',label:'站起来',keywords:['站起来','站起身','起立','站起']},
+    {id:'nod',label:'点头',keywords:['点点头','点一下头','点头']},
+    {id:'shake',label:'摇头',keywords:['摇摇头','摇一下头','摇头']},
+    {id:'bow',label:'鞠躬',keywords:['鞠个躬','鞠躬','弯腰致意']}
+];
 
-function updateStatus(connected) {
-    const badge = document.getElementById('statusBadge');
-    if (connected) {
-        badge.className = 'session-badge connected';
-        badge.innerHTML = '<span class="status-dot on"></span>已连接';
-    } else {
-        badge.className = 'session-badge disconnected';
-        badge.innerHTML = '<span class="status-dot off"></span>未连接';
-    }
+function showError(message) {
+    ui.errorBox.textContent = message;
+    ui.errorBox.classList.toggle('show', Boolean(message));
 }
-
-function setSessionId(sid) {
-    sessionid = sid;
-    document.getElementById('sessionIdDisplay').textContent = 'SID: ' + (sid || '-');
+function setStatus(text, kind='') {
+    ui.stateText.textContent = text;
+    ui.stateBadge.className = `state-badge ${kind}`;
 }
-
-function showError(msg) {
-    const el = document.getElementById('offerError');
-    el.textContent = msg;
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 8000);
-}
-
-// ─── WebRTC ────────────────────────────────────────────────
-function negotiate() {
-    pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
-    return pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
-        return new Promise(resolve => {
-            if (pc.iceGatheringState === 'complete') resolve();
-            else {
-                const check = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', check); resolve(); } };
-                pc.addEventListener('icegatheringstatechange', check);
-            }
-        });
-    }).then(() => {
-        const offer = pc.localDescription;
-        const body = {
-            sdp: offer.sdp,
-            type: offer.type,
-            avatar: document.getElementById('offerAvatar').value || undefined,
-            refaudio: document.getElementById('offerRefAudio').value || undefined,
-            reftext: document.getElementById('offerRefText').value || undefined,
-        };
-        return fetch('/offer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    }).then(res => res.json()).then(answer => {
-        // 检查服务端返回的错误码
-        if (answer.code && answer.code !== 0) {
-            throw new Error(answer.msg || 'Unknown server error');
-        }
-        if (!answer.sdp) {
-            throw new Error('Server returned no SDP');
-        }
-        if (answer.sessionid) setSessionId(answer.sessionid);
-        return pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answer.sdp }));
-    }).catch(e => {
-        const msg = e.message || String(e);
-        showError(msg);
-        // 出错时重置连接状态
-        if (pc) { pc.close(); pc = null; }
-        updateStatus(false);
-        setSessionId(null);
-        document.getElementById('btnStart').style.display = 'inline-block';
-        document.getElementById('btnStop').style.display = 'none';
+function setStage(name) {
+    const index = stages.indexOf(name);
+    document.querySelectorAll('.signal-step').forEach((el,i) => {
+        el.classList.toggle('active', i === index);
+        el.classList.toggle('done', i < index);
     });
 }
-
-function start() {
-    document.getElementById('offerError').style.display = 'none';
-    const config = { sdpSemantics: 'unified-plan' };
-    if (document.getElementById('use-stun')?.checked) {
-        config.iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+function setBusy(value) {
+    state.busy = value;
+    ui.sendButton.disabled = !state.connected || value;
+    ui.stopButton.disabled = !state.connected || !value;
+}
+function refreshControls() {
+    ui.connectButton.disabled = state.connected;
+    ui.reconnectButton.disabled = !state.connected;
+    ui.clearButton.disabled = !state.connected;
+    document.querySelectorAll('.quick-action').forEach(button => button.disabled=!state.connected);
+    setBusy(state.busy);
+}
+function detectActionCommand(text) {
+    const normalized=String(text||'').replace(/\s+/g,'');
+    return actions.find(action=>action.keywords.some(keyword=>normalized.includes(keyword))) || null;
+}
+function isActionOnly(text,action) {
+    let remainder=String(text||'');
+    action.keywords.forEach(keyword=>{ remainder=remainder.replaceAll(keyword,''); });
+    remainder=remainder.replace(/[，。！？,.!?]/g,'').replace(/请|你|您|一下|马上|立刻|可以|能不能|帮我|让数字人|她|他|好吗|好不好|吧|呀|啊/g,'');
+    return remainder.trim().length===0;
+}
+function setActionSelection(actionId) {
+    document.querySelectorAll('.quick-action').forEach(button=>{
+        button.classList.toggle('active',button.dataset.action===actionId || (actionId==='stand'&&button.dataset.action==='stand'));
+    });
+}
+function performAction(actionId,{record=true}={}) {
+    const action=actions.find(item=>item.id===actionId);
+    if(!action) return false;
+    clearTimeout(state.motionTimer);
+    ui.video.classList.remove('motion-nod','motion-shake','motion-bow');
+    if(actionId==='crouch') {
+        state.pose='crouch'; ui.video.classList.add('pose-crouch');
+        ui.video.style.setProperty('--avatar-pose','translateY(15%) scaleX(1.035) scaleY(.78)');
+        ui.actionState.textContent='已蹲下'; setActionSelection('crouch');
+    } else if(actionId==='stand') {
+        state.pose='stand'; ui.video.classList.remove('pose-crouch');
+        ui.video.style.setProperty('--avatar-pose','none');
+        ui.actionState.textContent='已站立'; setActionSelection('stand');
+    } else {
+        const motionClass=`motion-${actionId}`;
+        ui.video.style.setProperty('--avatar-pose',state.pose==='crouch'?'translateY(15%) scaleX(1.035) scaleY(.78)':'none');
+        void ui.video.offsetWidth;
+        ui.video.classList.add(motionClass);
+        ui.actionState.textContent=`正在${action.label}`;
+        setActionSelection(actionId);
+        state.motionTimer=setTimeout(()=>{
+            ui.video.classList.remove(motionClass);
+            ui.actionState.textContent=state.pose==='crouch'?'已蹲下':'站立';
+            setActionSelection(state.pose);
+        },1250);
     }
-    pc = new RTCPeerConnection(config);
-    pc.addEventListener('track', evt => {
-        if (evt.track.kind === 'video') document.getElementById('video').srcObject = evt.streams[0];
-        else document.getElementById('audio').srcObject = evt.streams[0];
+    setStatus(`动作：${action.label}`,'connected');
+    if(record) addMessage('assistant',`已执行动作：${action.label}`,'动作响应');
+    return true;
+}
+function addMessage(role, text, label='') {
+    ui.emptyHistory?.remove();
+    const row = document.createElement('div');
+    row.className = `message ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = label ? `${label}\n${text}` : text;
+    row.appendChild(bubble);
+    ui.messages.appendChild(row);
+    ui.messages.scrollTop = ui.messages.scrollHeight;
+}
+function clearMessages() {
+    ui.messages.replaceChildren();
+    const empty = document.createElement('div');
+    empty.id='emptyHistory'; empty.className='empty-history';
+    empty.innerHTML='<div><i class="bi bi-chat-square-dots"></i><br>当前会话已清空</div>';
+    ui.messages.appendChild(empty);
+}
+async function waitIceComplete(pc) {
+    if (pc.iceGatheringState === 'complete') return;
+    await new Promise(resolve => {
+        const timeout = setTimeout(resolve, 5000);
+        const check = () => {
+            if (pc.iceGatheringState === 'complete') {
+                clearTimeout(timeout); pc.removeEventListener('icegatheringstatechange',check); resolve();
+            }
+        };
+        pc.addEventListener('icegatheringstatechange',check);
+    });
+}
+async function connect() {
+    if (state.connected || state.connecting) return;
+    state.connecting=true;
+    showError(''); setStatus('正在连接','working'); setStage('connect');
+    ui.connectButton.disabled=true; ui.connectButton.textContent='正在连接…';
+    const pc = new RTCPeerConnection();
+    state.pc = pc;
+    pc.addTransceiver('video',{direction:'recvonly'});
+    pc.addTransceiver('audio',{direction:'recvonly'});
+    pc.addEventListener('track', event => {
+        if (event.track.kind === 'video') {
+            ui.video.srcObject = new MediaStream([event.track]);
+            ui.videoFrame.classList.add('has-video');
+        } else {
+            ui.remoteAudio.srcObject = new MediaStream([event.track]);
+            ui.remoteAudio.play().catch(()=>{});
+        }
     });
     pc.addEventListener('connectionstatechange', () => {
-        if (pc.connectionState === 'connected') updateStatus(true);
-        else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') { updateStatus(false); setSessionId(null); }
-    });
-    negotiate();
-    document.getElementById('btnStart').style.display = 'none';
-    document.getElementById('btnStop').style.display = 'inline-block';
-}
-
-function stop() {
-    if (pc) { pc.close(); pc = null; }
-    updateStatus(false);
-    setSessionId(null);
-    document.getElementById('btnStart').style.display = 'inline-block';
-    document.getElementById('btnStop').style.display = 'none';
-    document.getElementById('video').srcObject = null;
-    document.getElementById('audio').srcObject = null;
-}
-
-// ─── Text ──────────────────────────────────────────────────
-function sendText() {
-    const text = document.getElementById('txtMessage').value;
-    const type = document.getElementById('txtType').value;
-    const interrupt = document.getElementById('txtInterrupt').checked;
-    if (!text || !sessionid) return alert('请先连接 WebRTC');
-
-    fetch('/human', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, type, interrupt, sessionid: String(sessionid) }),
-    }).then(r => r.json()).then(d => {
-        console.log('human:', d);
-        document.getElementById('txtMessage').value = '';
-    });
-}
-
-// ─── Audio Upload ──────────────────────────────────────────
-function uploadAudio() {
-    const file = document.getElementById('audioFile').files[0];
-    if (!file || !sessionid) return alert('请先连接 WebRTC 并选择音频文件');
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('sessionid', String(sessionid));
-
-    fetch('/humanaudio', { method: 'POST', body: formData })
-        .then(r => r.json()).then(d => console.log('humanaudio:', d));
-}
-
-// ─── Interrupt ─────────────────────────────────────────────
-function interrupt() {
-    if (!sessionid) return;
-    fetch('/interrupt_talk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionid: String(sessionid) }),
-    }).then(r => r.json()).then(d => console.log('interrupt:', d));
-}
-
-// ─── Speaking Status ───────────────────────────────────────
-function checkSpeaking() {
-    if (!sessionid) return alert('请先连接 WebRTC');
-    fetch('/is_speaking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionid: String(sessionid) }),
-    }).then(r => r.json()).then(d => alert('Speaking: ' + JSON.stringify(d.data)));
-}
-
-// ─── Recording ─────────────────────────────────────────────
-let recording = false;
-function toggleRecord() {
-    if (!sessionid) return alert('请先连接 WebRTC');
-    const btn = document.getElementById('btnRecToggle');
-    const type = recording ? 'end_record' : 'start_record';
-    fetch('/record', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, sessionid: String(sessionid) }),
-    }).then(r => r.json()).then(d => {
-        console.log(type + ':', d);
-        recording = !recording;
-        if (recording) {
-            btn.className = 'btn-danger-custom btn-sm';
-            btn.innerHTML = '<i class="bi bi-stop-circle"></i> 停止录制';
-            document.getElementById('btnDownload').disabled = true;
-        } else {
-            btn.className = 'btn-outline-custom btn-sm';
-            btn.innerHTML = '<i class="bi bi-record-circle"></i> 开始录制';
-            document.getElementById('btnDownload').disabled = false;
+        if (pc !== state.pc) return;
+        if (pc.connectionState === 'connected') {
+            state.connected=true; setStatus('已连接','connected'); setStage('input'); refreshControls();
+            localStorage.setItem('livetalking-autoconnect','1');
+        } else if (['failed','disconnected'].includes(pc.connectionState)) {
+            state.connected=false; setBusy(false); setStatus('连接失败','error'); showError('WebRTC连接已断开，请点击重连。'); refreshControls();
         }
     });
+    try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitIceComplete(pc);
+        const response = await fetch('/offer',{
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                sdp:pc.localDescription.sdp,type:pc.localDescription.type,avatar:ui.avatarId.value,
+                previous_sessionid:localStorage.getItem('livetalking-sessionid') || undefined
+            })
+        });
+        const answer = await response.json();
+        if (!response.ok || answer.code) throw new Error(answer.msg || '服务端拒绝了连接');
+        state.sessionid=String(answer.sessionid); ui.sessionLabel.textContent=`SESSION ${state.sessionid}`;
+        localStorage.setItem('livetalking-sessionid',state.sessionid);
+        await pc.setRemoteDescription({type:answer.type,sdp:answer.sdp});
+        openEvents(); startMetrics(); await loadHistory();
+    } catch(error) {
+        state.connected=false; pc.close(); setStatus('连接失败','error'); showError(`连接失败：${error.message}`); refreshControls();
+    } finally {
+        state.connecting=false;
+        ui.connectButton.textContent='建立连接';
+        if(!state.connected) ui.connectButton.disabled=false;
+    }
 }
-function downloadRecord() {
-    if (!sessionid) return;
-    window.open('/record/' + sessionid, '_blank');
+async function disconnect() {
+    const previousSession=state.sessionid;
+    if(previousSession) {
+        try {
+            await fetch('/api/session/close',{
+                method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({sessionid:previousSession})
+            });
+        } catch { /* the local peer is still closed below */ }
+    }
+    const previousPc=state.pc; state.pc=null;
+    state.eventSource?.close(); state.eventSource=null;
+    clearInterval(state.pollTimer); state.pollTimer=null;
+    previousPc?.close(); state.connected=false; state.sessionid=null; setBusy(false);
+    performAction('stand',{record:false});
+    ui.video.srcObject=null; ui.remoteAudio.srcObject=null; ui.videoFrame.classList.remove('has-video');
+    ui.sessionLabel.textContent='SESSION —'; setStatus('未连接'); setStage('connect'); refreshControls();
 }
+async function reconnect() { await disconnect(); connect(); }
+function openEvents() {
+    state.eventSource?.close();
+    state.eventSource = new EventSource(`/sse?sessionid=${encodeURIComponent(state.sessionid)}`);
+    state.eventSource.onmessage = event => {
+        try { handleEvent(JSON.parse(event.data)); } catch { /* ignore malformed optional event */ }
+    };
+    state.eventSource.onerror = () => {
+        if (state.connected) showError('状态通道暂时断开，WebRTC画面仍可继续；重连可恢复状态。');
+    };
+}
+function handleEvent(event) {
+    if (event.type === 'system' && event.status === 'error') {
+        setBusy(false); showError(event.message || '运行任务失败'); setStage('input'); return;
+    }
+    if (event.type === 'llm') {
+        if (event.status === 'generating') { setStatus('正在生成回答','working'); setStage('answer'); }
+        if (event.status === 'answer') { addMessage('assistant',event.text,'AI回答'); setStatus('正在合成语音','working'); setStage('speech'); }
+        if (event.status === 'synthesizing') { setStatus('正在合成语音','working'); setStage('speech'); }
+        if (event.status === 'error') { setBusy(false); showError(event.message || 'AI回答失败'); }
+        if (event.status === 'interrupted') { setBusy(false); setStatus('已被打断'); setStage('input'); }
+        if (event.status === 'cleared') { setBusy(false); clearMessages(); setStatus('已连接','connected'); setStage('input'); }
+        return;
+    }
+    if (event.type === 'tts' && event.status === 'error') {
+        setBusy(false); showError(event.message || '语音合成失败'); setStage('input'); return;
+    }
+    if (event.status === 'start') { setStatus('数字人正在说话','speaking'); setStage('avatar'); }
+    if (event.status === 'end') { setBusy(false); setStatus('已连接','connected'); setStage('input'); }
+}
+async function sendMessage() {
+    const text=ui.messageInput.value.trim();
+    if(!state.connected) return showError('请先建立WebRTC连接。');
+    if(state.busy) return showError('当前请求仍在处理，请等待或先停止说话。');
+    if(!text) return showError('请输入要朗读或提问的文字。');
+    const requestedAction=detectActionCommand(text);
+    if(requestedAction) {
+        const actionOnly=isActionOnly(text,requestedAction);
+        if(actionOnly) addMessage('user',text,'动作指令');
+        performAction(requestedAction.id);
+        if(actionOnly) { ui.messageInput.value=''; return; }
+    }
+    showError(''); setBusy(true); setStage('input');
+    const mode=document.querySelector('input[name="mode"]:checked').value;
+    addMessage('user',text,mode==='chat'?'我的问题':'直接朗读');
+    ui.messageInput.value='';
+    setStatus(mode==='chat'?'正在生成回答':'正在合成语音','working');
+    setStage(mode==='chat'?'answer':'speech');
+    try {
+        const response=await fetch('/human',{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                sessionid:state.sessionid,text,type:mode,interrupt:true,
+                tts:{voice:ui.voice.value,rate:ui.rate.value,volume:ui.volume.value,pitch:ui.pitch.value}
+            })
+        });
+        const data=await response.json();
+        if(!response.ok || data.code) throw new Error(data.msg || '请求失败');
+    } catch(error) { setBusy(false); showError(`发送失败：${error.message}`); setStage('input'); }
+}
+async function stopTalking() {
+    if(!state.sessionid) return;
+    try {
+        await fetch('/interrupt_talk',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionid:state.sessionid})});
+        setBusy(false); setStatus('已被打断'); setStage('input');
+    } catch(error) { showError(`停止失败：${error.message}`); }
+}
+async function clearConversation() {
+    if(!state.sessionid) return;
+    try {
+        const response=await fetch('/api/chat/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionid:state.sessionid})});
+        const data=await response.json(); if(!response.ok) throw new Error(data.message);
+        clearMessages(); setBusy(false); setStatus('已连接','connected'); setStage('input');
+    } catch(error) { showError(`清空失败：${error.message}`); }
+}
+async function loadHistory() {
+    const response=await fetch(`/api/chat/history?sessionid=${encodeURIComponent(state.sessionid)}`);
+    if(!response.ok) return;
+    const data=await response.json();
+    if(data.history?.length) {
+        ui.messages.replaceChildren();
+        data.history.forEach(item=>addMessage(item.role==='user'?'user':'assistant',item.content,item.role==='user'?'我的问题':'AI回答'));
+    }
+}
+async function loadVoices() {
+    try {
+        const [voicesResponse,configResponse]=await Promise.all([fetch('/api/tts/voices?locale=zh-CN'),fetch('/api/tts/config')]);
+        const voices=await voicesResponse.json(),config=await configResponse.json();
+        if(!voicesResponse.ok) throw new Error(voices.message);
+        ui.voice.replaceChildren(...voices.voices.map(item=>{const option=document.createElement('option');option.value=item.ShortName;option.textContent=item.ShortName;return option;}));
+        ui.voice.value=config.voice || 'zh-CN-XiaoxiaoNeural'; ui.rate.value=config.rate; ui.volume.value=config.volume; ui.pitch.value=config.pitch;
+    } catch(error) { showError(`声音列表读取失败：${error.message}`); }
+}
+function startMetrics() {
+    clearInterval(state.pollTimer);
+    const poll=async()=>{
+        if(!state.sessionid) return;
+        try {
+            const response=await fetch(`/api/status?sessionid=${encodeURIComponent(state.sessionid)}`);
+            if(!response.ok) return;
+            const data=await response.json(),m=data.metrics||{},g=data.gpu||{};
+            ui.inferFps.textContent=m.inferfps?Number(m.inferfps).toFixed(1):'—';
+            ui.finalFps.textContent=m.finalfps?Number(m.finalfps).toFixed(1):'—';
+            ui.gpuMemory.textContent=g.allocated_mb?`${g.allocated_mb}M`:'—';
+            ui.gpuPeak.textContent=g.peak_allocated_mb?`${g.peak_allocated_mb}M`:'—';
+            ui.ttsLatency.textContent=m.tts_seconds?`${Number(m.tts_seconds).toFixed(2)}s`:'—';
+            ui.llmLatency.textContent=m.llm_first_token_seconds?`${Number(m.llm_first_token_seconds).toFixed(2)}s`:'—';
+            ui.startLatency.textContent=m.start_total_seconds?`${Number(m.start_total_seconds).toFixed(2)}s`:'—';
+            ui.processMemory.textContent=data.process_memory_mb?`${data.process_memory_mb}M`:'—';
+            if(data.speaking && !state.busy) setStatus('数字人正在说话','speaking');
+            if(state.busy && m.request_active === false && !data.speaking) {
+                setBusy(false); setStatus('已连接','connected'); setStage('input');
+            }
+        } catch { /* polling is best effort */ }
+    };
+    poll(); state.pollTimer=setInterval(poll,1000);
+}
+async function uploadAudio() {
+    const file=ui.audioFile.files[0]; if(!file||!state.sessionid) return showError('请先连接并选择音频文件。');
+    const form=new FormData(); form.append('file',file); form.append('sessionid',state.sessionid);
+    const response=await fetch('/humanaudio',{method:'POST',body:form}); if(!response.ok) showError('音频上传失败。');
+}
+async function toggleRecord() {
+    if(!state.sessionid) return showError('请先连接。');
+    const type=state.recording?'end_record':'start_record';
+    await fetch('/record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type,sessionid:state.sessionid})});
+    state.recording=!state.recording; ui.recordButton.textContent=state.recording?'停止录制':'开始录制'; ui.downloadButton.disabled=state.recording;
+}
+function downloadRecord(){ if(state.sessionid) location.href=`/record/${encodeURIComponent(state.sessionid)}`; }
+async function setAction(){ if(state.sessionid) await fetch('/set_audiotype',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionid:state.sessionid,audiotype:Number(ui.audioType.value)})}); }
 
-// ─── Audiotype ─────────────────────────────────────────────
-function setAudiotype() {
-    if (!sessionid) return alert('请先连接 WebRTC');
-    const val = parseInt(document.getElementById('audiotypeVal').value) || 0;
-    fetch('/set_audiotype', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audiotype: val, sessionid: String(sessionid) }),
-    }).then(r => r.json()).then(d => console.log('set_audiotype:', d));
-}
-
+ui.connectButton.addEventListener('click',connect); ui.reconnectButton.addEventListener('click',reconnect);
+ui.sendButton.addEventListener('click',sendMessage); ui.stopButton.addEventListener('click',stopTalking); ui.clearButton.addEventListener('click',clearConversation);
+ui.messageInput.addEventListener('keydown',event=>{if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();sendMessage();}});
+ui.uploadButton.addEventListener('click',uploadAudio); ui.recordButton.addEventListener('click',toggleRecord); ui.downloadButton.addEventListener('click',downloadRecord); ui.actionButton.addEventListener('click',setAction);
+document.querySelectorAll('.quick-action').forEach(button=>button.addEventListener('click',()=>performAction(button.dataset.action)));
+ui.video.addEventListener('loadedmetadata',()=>{ui.resolutionHud.textContent=`${ui.video.videoWidth} × ${ui.video.videoHeight}`;});
+window.addEventListener('beforeunload',()=>{
+    clearInterval(state.pollTimer);
+    state.eventSource?.close();
+    if(state.sessionid) {
+        navigator.sendBeacon(
+            '/api/session/close',
+            new Blob([JSON.stringify({sessionid:state.sessionid})],{type:'application/json'})
+        );
+    }
+    state.pc?.close();
+});
+loadVoices().then(()=>{refreshControls();if(localStorage.getItem('livetalking-autoconnect')==='1')setTimeout(connect,300);});
 </script>
 </body>
 </html>

@@ -38,11 +38,46 @@ class RTCManager:
         """
         self.opt = opt
         self.pcs: set = set()
+        self.session_pcs: dict[str, RTCPeerConnection] = {}
+        self.session_players: dict[str, object] = {}
+        self.closing_sessions: set[str] = set()
+
+    async def close_session(self, sessionid: str):
+        """Close one peer and release only its matching avatar resources."""
+        if sessionid in self.closing_sessions:
+            return
+        self.closing_sessions.add(sessionid)
+        try:
+            pc = self.session_pcs.pop(sessionid, None)
+            player = self.session_players.pop(sessionid, None)
+            if player is not None:
+                # Release workers before closing the peer. The connection-state
+                # callback can fire from pc.close(), so the closing guard also
+                # prevents a re-entrant close from racing this cleanup.
+                player.audio.stop()
+                player.video.stop()
+            session_manager.remove_session(sessionid)
+            if pc is not None:
+                self.pcs.discard(pc)
+                if pc.connectionState != "closed":
+                    try:
+                        await asyncio.wait_for(pc.close(), timeout=5)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Timed out closing peer for session=%s; resources were released",
+                            sessionid,
+                        )
+        finally:
+            self.closing_sessions.discard(sessionid)
 
     async def handle_offer(self, request):
         """处理 WebRTC offer 信令"""
         params = await request.json()
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+        previous_sessionid = str(params.get("previous_sessionid", "")).strip()
+        if previous_sessionid:
+            await self.close_session(previous_sessionid)
 
         # 通过 SessionManager 构建（内部会检查 max_session）
         try:
@@ -62,18 +97,19 @@ class RTCManager:
             configuration=RTCConfiguration(iceServers=[ice_server])
         )
         self.pcs.add(pc)
+        self.session_pcs[sessionid] = pc
 
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info("Connection state is %s", pc.connectionState)
-            if pc.connectionState in ("failed", "closed"):
-                await pc.close()
-                self.pcs.discard(pc)
-                session_manager.remove_session(sessionid)
+            if pc.connectionState in ("failed", "disconnected", "closed"):
+                if self.session_pcs.get(sessionid) is pc:
+                    await self.close_session(sessionid)
 
         # 添加发送轨道
         from server.webrtc import HumanPlayer
         player = HumanPlayer(avatar_session)
+        self.session_players[sessionid] = player
         pc.addTrack(player.audio)
         pc.addTrack(player.video)
 
@@ -132,6 +168,11 @@ class RTCManager:
 
     async def shutdown(self):
         """关闭所有 PeerConnection"""
-        coros = [pc.close() for pc in self.pcs]
-        await asyncio.gather(*coros)
+        sessionids = list(self.session_pcs)
+        await asyncio.gather(*(self.close_session(sid) for sid in sessionids))
+        coros = [pc.close() for pc in self.pcs if pc.connectionState != "closed"]
+        if coros:
+            await asyncio.gather(*coros)
         self.pcs.clear()
+        self.session_players.clear()
+        self.closing_sessions.clear()

@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LiveTalking - Real-time Digital Human</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <style>
         :root {
             --primary: #4361ee;
@@ -133,7 +134,10 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ref Audio</label>
-                            <input type="text" class="form-control form-control-sm" id="offerRefAudio" placeholder="zh-CN-YunxiaNeural">
+                            <input type="text" class="form-control form-control-sm" id="offerRefAudio"
+                                   list="edgeVoiceList" value="zh-CN-XiaoxiaoNeural"
+                                   placeholder="zh-CN-XiaoxiaoNeural">
+                            <datalist id="edgeVoiceList"></datalist>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ref Text</label>
@@ -162,6 +166,20 @@
                     <div class="mb-2">
                         <label class="form-label">Text <span class="param-hint">(type: echo/chat)</span></label>
                         <textarea class="form-control form-control-sm" id="txtMessage" rows="2" placeholder="Enter text to speak...">Hello, welcome to LiveTalking</textarea>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-4">
+                            <label class="form-label">Rate</label>
+                            <input class="form-control form-control-sm" id="edgeRate" value="+0%">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Volume</label>
+                            <input class="form-control form-control-sm" id="edgeVolume" value="+0%">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Pitch</label>
+                            <input class="form-control form-control-sm" id="edgePitch" value="+0Hz">
+                        </div>
                     </div>
                     <div class="d-flex gap-2 align-items-end">
                         <select class="form-select form-select-sm" style="width:120px;" id="txtType">
@@ -329,7 +347,15 @@ function sendText() {
     fetch('/human', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, type, interrupt, sessionid: String(sessionid) }),
+        body: JSON.stringify({
+            text, type, interrupt, sessionid: String(sessionid),
+            tts: {
+                voice: document.getElementById('offerRefAudio').value || 'zh-CN-XiaoxiaoNeural',
+                rate: document.getElementById('edgeRate').value,
+                volume: document.getElementById('edgeVolume').value,
+                pitch: document.getElementById('edgePitch').value,
+            },
+        }),
     }).then(r => r.json()).then(d => {
         console.log('human:', d);
         document.getElementById('txtMessage').value = '';
@@ -408,6 +434,32 @@ function setAudiotype() {
         body: JSON.stringify({ audiotype: val, sessionid: String(sessionid) }),
     }).then(r => r.json()).then(d => console.log('set_audiotype:', d));
 }
+
+async function loadEdgeTtsConfig() {
+    try {
+        const [configResponse, voicesResponse] = await Promise.all([
+            fetch('/api/tts/config'),
+            fetch('/api/tts/voices?locale=zh-CN'),
+        ]);
+        if (configResponse.ok) {
+            const config = await configResponse.json();
+            document.getElementById('offerRefAudio').value = config.voice;
+            document.getElementById('edgeRate').value = config.rate;
+            document.getElementById('edgeVolume').value = config.volume;
+            document.getElementById('edgePitch').value = config.pitch;
+        }
+        if (voicesResponse.ok) {
+            const data = await voicesResponse.json();
+            document.getElementById('edgeVoiceList').innerHTML = data.voices
+                .map(voice => `<option value="${voice.ShortName}">${voice.FriendlyName || voice.ShortName}</option>`)
+                .join('');
+        }
+    } catch (error) {
+        console.warn('EdgeTTS configuration is temporarily unavailable:', error.message);
+    }
+}
+
+window.addEventListener('DOMContentLoaded', loadEdgeTtsConfig);
 
 </script>
 </body>

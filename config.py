@@ -5,6 +5,12 @@
 import argparse
 import json
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=False)
 
 try:
     import yaml
@@ -65,18 +71,58 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=16, help="infer batch")
     parser.add_argument('--modelres', type=int, default=192)
     parser.add_argument('--modelfile', type=str, default='')
+    parser.add_argument('--video_profile', type=str, default='720p',
+                        choices=['source', '720p', '1080p'],
+                        help='portrait output profile; 1080p is experimental')
 
     # ─── 自定义动作和多形象 ────────────────────────────────────────────
     parser.add_argument('--customvideo_config', type=str, default='',
                         help="custom action json")
 
     # ─── TTS ───────────────────────────────────────────────────────────
+    parser.add_argument('--TTS_PROVIDER', type=str,
+                        default=os.getenv("TTS_PROVIDER", "edge"))
     parser.add_argument('--tts', type=str, default='edgetts',
                         help="tts plugin: edgetts/gpt-sovits/cosyvoice/fishtts/tencent/doubao/indextts2/azuretts/qwentts")
-    parser.add_argument('--REF_FILE', type=str, default="zh-CN-YunxiaNeural",
+    parser.add_argument('--EDGE_TTS_VOICE', type=str,
+                        default=os.getenv("EDGE_TTS_VOICE", "zh-CN-XiaoxiaoNeural"))
+    parser.add_argument('--EDGE_TTS_RATE', type=str,
+                        default=os.getenv("EDGE_TTS_RATE", "+0%"))
+    parser.add_argument('--EDGE_TTS_VOLUME', type=str,
+                        default=os.getenv("EDGE_TTS_VOLUME", "+0%"))
+    parser.add_argument('--EDGE_TTS_PITCH', type=str,
+                        default=os.getenv("EDGE_TTS_PITCH", "+0Hz"))
+    parser.add_argument('--TTS_TIMEOUT_SECONDS', type=float,
+                        default=float(os.getenv("TTS_TIMEOUT_SECONDS", "30")))
+    parser.add_argument('--REF_FILE', type=str, default="",
                         help="参考文件名或语音模型ID")
     parser.add_argument('--REF_TEXT', type=str, default=None)
     parser.add_argument('--TTS_SERVER', type=str, default='http://127.0.0.1:9880')
+
+    # OpenAI-compatible online LLM. Credentials are read from .env only.
+    parser.add_argument('--LLM_PROVIDER', type=str,
+                        default=os.getenv("LLM_PROVIDER", "openai_compatible"))
+    parser.add_argument('--LLM_BASE_URL', type=str,
+                        default=os.getenv("LLM_BASE_URL", ""))
+    parser.add_argument('--LLM_API_KEY', type=str,
+                        default=os.getenv("LLM_API_KEY", ""))
+    parser.add_argument('--LLM_MODEL', type=str,
+                        default=os.getenv("LLM_MODEL", ""))
+    parser.add_argument('--LLM_TIMEOUT_SECONDS', type=float,
+                        default=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
+    parser.add_argument('--LLM_MAX_RETRIES', type=int,
+                        default=int(os.getenv("LLM_MAX_RETRIES", "2")))
+    parser.add_argument('--LLM_TEMPERATURE', type=float,
+                        default=float(os.getenv("LLM_TEMPERATURE", "0.7")))
+    parser.add_argument('--LLM_MAX_HISTORY_TURNS', type=int,
+                        default=int(os.getenv("LLM_MAX_HISTORY_TURNS", "10")))
+    parser.add_argument('--LLM_STREAM', type=str,
+                        default=os.getenv("LLM_STREAM", "true"))
+    parser.add_argument('--SYSTEM_PROMPT', type=str,
+                        default=os.getenv(
+                            "SYSTEM_PROMPT",
+                            "你是一名简洁、自然、友好的AI数字人助手。",
+                        ))
 
     # ─── 传输 ─────────────────────────────────────────────────────────
     parser.add_argument('--transport', type=str, default='webrtc',
@@ -85,9 +131,13 @@ def parse_args():
                         help="stun server url")
     parser.add_argument('--push_url', type=str,
                         default='http://localhost:1985/rtc/v1/whip/?app=live&stream=livestream')
-    parser.add_argument('--max_session', type=int, default=5)
+    parser.add_argument('--max_session', type=int, default=1)
     parser.add_argument('--listenport', type=int, default=8010,
                         help="web listen port")
+    parser.add_argument('--host', type=str,
+                        default=os.getenv("LIVETALKING_HOST", "127.0.0.1"),
+                        choices=["127.0.0.1", "0.0.0.0"],
+                        help="bind address; use 0.0.0.0 only for explicit LAN mode")
 
     # ─── 虚拟摄像头 ───────────────────────────────────────────────────
     parser.add_argument('--audio_output_device', type=int, default=None,

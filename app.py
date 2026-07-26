@@ -135,7 +135,11 @@ def main():
     load_model = avatar_mod.load_model
     load_avatar = avatar_mod.load_avatar
     warm_up = avatar_mod.warm_up
-    logger.info(opt)
+    safe_config = vars(copy.deepcopy(opt))
+    for secret_name in ("LLM_API_KEY", "TENCENT_SECRET_KEY", "TENCENT_SECRET_ID"):
+        if secret_name in safe_config:
+            safe_config[secret_name] = "***" if safe_config[secret_name] else ""
+    logger.info("Configuration: %s", safe_config)
 
     if opt.model == 'musetalk':
         model = load_model()
@@ -197,13 +201,13 @@ def main():
         pagename='rtmpapi.html'
     elif opt.transport=='rtcpush':
         pagename='rtcpushapi.html'
-    logger.info('start http server; http://<serverip>:'+str(opt.listenport)+'/'+pagename)
+    logger.info('start http server; http://%s:%s/%s', opt.host, opt.listenport, pagename)
     # logger.info('如果使用webrtc，推荐访问webrtc集成前端: http://<serverip>:'+str(opt.listenport)+'/dashboard.html')
     def run_server(runner):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(runner.setup())
-        site = web.TCPSite(runner, '0.0.0.0', opt.listenport)
+        site = web.TCPSite(runner, opt.host, opt.listenport)
         loop.run_until_complete(site.start())
         if opt.transport=='rtcpush':
             for k in range(opt.max_session):

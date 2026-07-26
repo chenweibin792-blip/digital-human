@@ -35,6 +35,7 @@ class SessionManager:
             self.sessions: Dict[str, BaseAvatar] = {}
             self.build_session_fn = None
             self.max_session = 1   # default, override via set_max_session()
+            self._create_lock = asyncio.Lock()
             self.initialized = True
 
     def set_max_session(self, n: int):
@@ -64,23 +65,26 @@ class SessionManager:
         if sessionid is None:
             sessionid = _rand_session_id()
             
-        # 检查是否达到最大会话数
-        active_count = sum(1 for s in self.sessions.values() if s is not None)
-        if active_count >= self.max_session:
-            raise MaxSessionError(
-                f"Maximum session limit reached ({active_count}/{self.max_session})"
-            )
+        async with self._create_lock:
+            # Placeholders count too, preventing concurrent offers from
+            # exceeding the configured limit while a session is being built.
+            active_count = len(self.sessions)
+            if active_count >= self.max_session:
+                raise MaxSessionError(
+                    f"Maximum session limit reached ({active_count}/{self.max_session})"
+                )
 
-        logger.info('Creating sessionid=%s, current session num=%d', sessionid, active_count)
-        # 预先占位防止重复
-        self.sessions[sessionid] = None
-
-        # 在线程池中构建 session（加载模型非常耗时）
-        avatar_session = await asyncio.get_event_loop().run_in_executor(
-            None, self.build_session_fn, sessionid, params
-        )
-        self.sessions[sessionid] = avatar_session
-        return sessionid
+            logger.info('Creating sessionid=%s, current session num=%d', sessionid, active_count)
+            self.sessions[sessionid] = None
+            try:
+                avatar_session = await asyncio.get_event_loop().run_in_executor(
+                    None, self.build_session_fn, sessionid, params
+                )
+                self.sessions[sessionid] = avatar_session
+                return sessionid
+            except Exception:
+                self.sessions.pop(sessionid, None)
+                raise
         
     def add_session(self, sessionid: str, avatar_session: BaseAvatar):
         """同步添加静态或外部管理的会话（供非服务端入口调用）"""
@@ -90,8 +94,17 @@ class SessionManager:
         """销毁会话资源"""
         if sessionid in self.sessions:
             logger.info(f"Removing session {sessionid}")
-            # todo: 还可以主动调 avatar_session 释放
-            self.sessions.pop(sessionid, None)
+            avatar_session = self.sessions.pop(sessionid, None)
+            if avatar_session is not None:
+                try:
+                    avatar_session.flush_talk()
+                except Exception:
+                    logger.debug("Session audio cleanup skipped for %s", sessionid)
+            try:
+                from llm import remove_llm_session
+                remove_llm_session(sessionid)
+            except Exception:
+                logger.debug("Session LLM cleanup skipped for %s", sessionid)
 
 # 单例抛出
 session_manager = SessionManager()

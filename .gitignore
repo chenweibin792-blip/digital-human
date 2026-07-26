@@ -1,8 +1,19 @@
 __pycache__/
+.env
+.env.*
+!.env.example
+.cache/
+.tmp/
 build/
 *.egg-info/
 *.so
 *.mp4
+*.wav
+*.mp3
+*.aac
+*.webm
+*.mkv
+*.flv
 
 tmp*
 trial*/

@@ -146,7 +146,9 @@ class PlayerStreamTrack(MediaStreamTrack):
             self.framecount += 1
             self.lasttime = time.perf_counter()
             if self.framecount==100:
-                mylogger.info(f"------actual avg final fps:{self.framecount/self.totaltime:.4f}")
+                finalfps = self.framecount / self.totaltime
+                self._player.set_metric("finalfps", round(finalfps, 4))
+                mylogger.info(f"------actual avg final fps:{finalfps:.4f}")
                 self.framecount = 0
                 self.totaltime=0
         return frame
@@ -202,9 +204,19 @@ class HumanPlayer:
     def get_buffer_size(self) -> int:
         return self.__video._queue.qsize()
 
+    def flush(self):
+        """Drop already buffered media while keeping both WebRTC tracks live."""
+        for track in (self.__audio, self.__video):
+            with track._queue.mutex:
+                track._queue.queue.clear()
+
     def notify(self,eventpoint):
         if self.__container is not None:
             self.__container.notify(eventpoint)
+
+    def set_metric(self, name, value):
+        if self.__container is not None and hasattr(self.__container, "runtime_metrics"):
+            self.__container.runtime_metrics[name] = value
 
     @property
     def audio(self) -> MediaStreamTrack:

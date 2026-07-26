@@ -4,9 +4,28 @@
 
 import json
 import asyncio
+import time
 from aiohttp import web
 
 from utils.logger import logger
+from llm import (
+    cancel_llm_session,
+    clear_llm_session,
+    get_llm_history,
+)
+from tts.edge import (
+    DEFAULT_PITCH,
+    DEFAULT_RATE,
+    DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_VOICE,
+    DEFAULT_VOLUME,
+    EdgeTTSError,
+    list_edge_voices,
+    pcm_to_wav_bytes,
+    speed_to_rate,
+    synthesize_edge_pcm,
+    validate_edge_settings,
+)
 
 
 # ─── 路由工具函数 ──────────────────────────────────────────────────────────
@@ -54,6 +73,10 @@ async def human(request):
             avatar_session.flush_talk()
 
         datainfo = {}
+        if hasattr(avatar_session, "runtime_metrics"):
+            avatar_session.runtime_metrics["request_started_at"] = time.perf_counter()
+            avatar_session.runtime_metrics["last_request_mode"] = params.get("type", "")
+            avatar_session.runtime_metrics["request_active"] = True
         if params.get('tts'):  # tts 参数透传（voice, emotion 等）
             datainfo['tts'] = params.get('tts')
 
@@ -80,7 +103,13 @@ async def interrupt_talk(request):
         avatar_session = get_session(request, sessionid)
         if avatar_session is None:
             return json_error("session not found")
+        cancel_llm_session(sessionid)
         avatar_session.flush_talk()
+        if hasattr(avatar_session, "runtime_metrics"):
+            avatar_session.runtime_metrics["request_active"] = False
+        avatar_session.send_msg(json.dumps(
+            {"type": "llm", "status": "interrupted"}, ensure_ascii=False
+        ))
         return json_ok()
     except Exception as e:
         logger.exception('interrupt_talk exception:')
@@ -149,6 +178,101 @@ async def is_speaking(request):
         return json_error("session not found")
     return json_ok(data=avatar_session.is_speaking())
 
+
+async def chat_history(request):
+    sessionid = request.query.get("sessionid", "")
+    if not session_manager.has_session(sessionid):
+        return _api_error("会话不存在或已结束", 404)
+    return web.json_response(
+        {"sessionid": sessionid, "history": get_llm_history(sessionid)},
+        dumps=lambda value: json.dumps(value, ensure_ascii=False),
+    )
+
+
+async def clear_chat(request):
+    try:
+        params = await request.json()
+        sessionid = str(params.get("sessionid", ""))
+        avatar_session = get_session(request, sessionid)
+        if avatar_session is None:
+            return _api_error("会话不存在或已结束", 404)
+        cancel_llm_session(sessionid)
+        avatar_session.flush_talk()
+        clear_llm_session(sessionid)
+        if hasattr(avatar_session, "runtime_metrics"):
+            avatar_session.runtime_metrics["request_active"] = False
+        avatar_session.send_msg(json.dumps(
+            {"type": "llm", "status": "cleared"}, ensure_ascii=False
+        ))
+        return web.json_response({"code": 0, "message": "当前会话已清空"})
+    except Exception:
+        logger.error("Clear chat request failed")
+        return _api_error("清空当前会话失败", 500)
+
+
+async def runtime_status(request):
+    sessionid = request.query.get("sessionid", "")
+    avatar_session = session_manager.get_session(sessionid)
+    if avatar_session is None:
+        return web.json_response({"sessionid": sessionid, "active": False})
+    try:
+        import os
+        import psutil
+        import torch
+
+        process = psutil.Process(os.getpid())
+        gpu = {
+            "available": bool(torch.cuda.is_available()),
+            "allocated_mb": 0.0,
+            "reserved_mb": 0.0,
+            "peak_allocated_mb": 0.0,
+            "total_mb": 0.0,
+        }
+        if gpu["available"]:
+            gpu.update(
+                {
+                    "allocated_mb": round(torch.cuda.memory_allocated() / 1048576, 1),
+                    "reserved_mb": round(torch.cuda.memory_reserved() / 1048576, 1),
+                    "peak_allocated_mb": round(
+                        torch.cuda.max_memory_allocated() / 1048576, 1
+                    ),
+                    "total_mb": round(
+                        torch.cuda.get_device_properties(0).total_memory / 1048576,
+                        1,
+                    ),
+                }
+            )
+        return web.json_response(
+            {
+                "sessionid": sessionid,
+                "active": True,
+                "speaking": avatar_session.is_speaking(),
+                "metrics": dict(getattr(avatar_session, "runtime_metrics", {})),
+                "gpu": gpu,
+                "process_memory_mb": round(process.memory_info().rss / 1048576, 1),
+                "system_memory_percent": psutil.virtual_memory().percent,
+            }
+        )
+    except Exception:
+        logger.error("Runtime status collection failed")
+        return _api_error("运行状态暂时不可用", 500)
+
+
+async def close_session(request):
+    try:
+        params = await request.json()
+        sessionid = str(params.get("sessionid", "")).strip()
+        if not sessionid:
+            return _api_error("缺少 sessionid", 400)
+        rtc_manager = request.app.get("rtc_manager")
+        if rtc_manager is None:
+            return _api_error("WebRTC 管理器不可用", 503)
+        await rtc_manager.close_session(sessionid)
+        return web.json_response({"code": 0, "message": "会话已关闭"})
+    except Exception:
+        logger.error("Close session request failed")
+        return _api_error("关闭会话失败", 500)
+
 async def sse_handler(request):
     """SSE 事件流，推送服务器状态更新到客户端"""
     sessionid = request.query.get('sessionid', '')
@@ -193,7 +317,11 @@ async def admin_config(request):
     try:
         opt = request.app.get("opt")
         if opt:
-            return json_ok(data={"config": vars(opt)})
+            safe_config = dict(vars(opt))
+            for key in list(safe_config):
+                if "KEY" in key.upper() or "TOKEN" in key.upper() or "SECRET" in key.upper():
+                    safe_config[key] = "***" if safe_config[key] else ""
+            return json_ok(data={"config": safe_config})
         return json_error("Config not found")
     except Exception as e:
         logger.exception('admin_config exception:')
@@ -228,6 +356,152 @@ async def admin_sessions(request):
         return json_error(str(e))
 
 
+def _edge_config(opt):
+    return validate_edge_settings(
+        voice=getattr(opt, "EDGE_TTS_VOICE", DEFAULT_VOICE),
+        rate=getattr(opt, "EDGE_TTS_RATE", DEFAULT_RATE),
+        volume=getattr(opt, "EDGE_TTS_VOLUME", DEFAULT_VOLUME),
+        pitch=getattr(opt, "EDGE_TTS_PITCH", DEFAULT_PITCH),
+        timeout_seconds=getattr(
+            opt, "TTS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
+        ),
+    )
+
+
+def _api_error(message: str, status: int):
+    return web.json_response(
+        {"code": -1, "message": str(message)}, status=status, dumps=lambda v: json.dumps(v, ensure_ascii=False)
+    )
+
+
+async def tts_config(request):
+    """Read or update the non-sensitive runtime EdgeTTS settings."""
+    opt = request.app.get("opt")
+    if opt is None:
+        return _api_error("TTS 配置不可用", 503)
+    try:
+        if request.method == "POST":
+            payload = await request.json()
+            current = _edge_config(opt)
+            updated = validate_edge_settings(
+                voice=payload.get("voice", current["voice"]),
+                rate=payload.get("rate", current["rate"]),
+                volume=payload.get("volume", current["volume"]),
+                pitch=payload.get("pitch", current["pitch"]),
+                timeout_seconds=payload.get(
+                    "timeout_seconds", current["timeout_seconds"]
+                ),
+            )
+            opt.EDGE_TTS_VOICE = updated["voice"]
+            opt.EDGE_TTS_RATE = updated["rate"]
+            opt.EDGE_TTS_VOLUME = updated["volume"]
+            opt.EDGE_TTS_PITCH = updated["pitch"]
+            opt.TTS_TIMEOUT_SECONDS = updated["timeout_seconds"]
+        settings = _edge_config(opt)
+        return web.json_response(
+            {"provider": "edge", **settings},
+            dumps=lambda v: json.dumps(v, ensure_ascii=False),
+        )
+    except EdgeTTSError as exc:
+        return _api_error(str(exc), 400)
+    except Exception:
+        logger.exception("EdgeTTS config endpoint failed")
+        return _api_error("TTS 配置处理失败", 500)
+
+
+async def _get_edge_voices(request):
+    opt = request.app.get("opt")
+    try:
+        timeout = getattr(opt, "TTS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
+        voices = await list_edge_voices(timeout)
+        locale = request.query.get("locale", "").strip()
+        if locale:
+            voices = [voice for voice in voices if voice.get("Locale") == locale]
+        return voices
+    except EdgeTTSError:
+        raise
+    except Exception as exc:
+        raise EdgeTTSError("无法获取语音列表，请检查网络连接") from exc
+
+
+async def edge_voices_api(request):
+    try:
+        voices = await _get_edge_voices(request)
+        return web.json_response(
+            {"provider": "edge", "count": len(voices), "voices": voices},
+            dumps=lambda v: json.dumps(v, ensure_ascii=False),
+        )
+    except EdgeTTSError as exc:
+        status = 504 if "超时" in str(exc) else 503
+        return _api_error(str(exc), status)
+
+
+async def openai_voices_api(request):
+    """Compatibility endpoint used by the existing TTS management page."""
+    try:
+        voices = await _get_edge_voices(request)
+        return web.json_response(
+            {
+                "voices": [voice.get("ShortName") for voice in voices],
+                "uploaded_voices": [],
+                "details": voices,
+            },
+            dumps=lambda v: json.dumps(v, ensure_ascii=False),
+        )
+    except EdgeTTSError as exc:
+        status = 504 if "超时" in str(exc) else 503
+        return _api_error(str(exc), status)
+
+
+async def openai_speech_api(request):
+    """Synthesize a WAV preview using the same adapter as Wav2Lip."""
+    opt = request.app.get("opt")
+    try:
+        payload = await request.json()
+        if str(payload.get("response_format", "wav")).lower() != "wav":
+            return _api_error("EdgeTTS 预览接口当前仅支持 WAV 格式", 400)
+        defaults = _edge_config(opt)
+        rate = payload.get("rate")
+        if rate is None and "speed" in payload:
+            rate = speed_to_rate(payload["speed"])
+        settings = validate_edge_settings(
+            voice=payload.get("voice", defaults["voice"]),
+            rate=rate or defaults["rate"],
+            volume=payload.get("volume", defaults["volume"]),
+            pitch=payload.get("pitch", defaults["pitch"]),
+            timeout_seconds=defaults["timeout_seconds"],
+        )
+        pcm = await asyncio.to_thread(
+            synthesize_edge_pcm,
+            text=payload.get("input", ""),
+            sample_rate=16_000,
+            **settings,
+        )
+        wav = pcm_to_wav_bytes(pcm)
+        return web.Response(
+            body=wav,
+            content_type="audio/wav",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'inline; filename="edge-preview.wav"',
+            },
+        )
+    except EdgeTTSError as exc:
+        message = str(exc)
+        if "超时" in message:
+            status = 504
+        elif "网络" in message:
+            status = 503
+        else:
+            status = 400
+        return _api_error(message, status)
+    except (json.JSONDecodeError, TypeError):
+        return _api_error("请求内容格式无效", 400)
+    except Exception:
+        logger.exception("EdgeTTS speech endpoint failed")
+        return _api_error("语音合成失败，服务仍在运行，请稍后重试", 500)
+
+
 # ─── 路由注册 ──────────────────────────────────────────────────────────────
 
 def setup_routes(app):
@@ -238,8 +512,17 @@ def setup_routes(app):
     app.router.add_post("/record", record)
     app.router.add_post("/interrupt_talk", interrupt_talk)
     app.router.add_post("/is_speaking", is_speaking)
+    app.router.add_get("/api/chat/history", chat_history)
+    app.router.add_post("/api/chat/clear", clear_chat)
+    app.router.add_get("/api/status", runtime_status)
+    app.router.add_post("/api/session/close", close_session)
     app.router.add_get("/api/admin/config", admin_config)
     app.router.add_get("/api/admin/sessions", admin_sessions)
+    app.router.add_get("/api/tts/config", tts_config)
+    app.router.add_post("/api/tts/config", tts_config)
+    app.router.add_get("/api/tts/voices", edge_voices_api)
+    app.router.add_get("/v1/audio/voices", openai_voices_api)
+    app.router.add_post("/v1/audio/speech", openai_speech_api)
     app.router.add_get('/sse', sse_handler)
 
     # ── Local ASR endpoint (SenseVoice/FunASR) ── Issue #604 ──

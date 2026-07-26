@@ -79,6 +79,24 @@ class BaseAvatar:
         self.custom_audio_index = {}
         self.custom_index = {}
         self.msgqueues = []
+        self.runtime_metrics = {
+            "inferfps": 0.0,
+            "finalfps": 0.0,
+            "tts_seconds": 0.0,
+            "llm_first_token_seconds": 0.0,
+            "llm_total_seconds": 0.0,
+            "start_total_seconds": 0.0,
+            "oom_count": 0,
+            "request_active": False,
+        }
+        profile_sizes = {
+            "source": None,
+            "720p": (720, 960),
+            "1080p": (1080, 1440),
+        }
+        self.output_size = profile_sizes.get(
+            getattr(opt, "video_profile", "720p"), (720, 960)
+        )
         # self.custom_opt = {}
         self.__loadcustom()
 
@@ -187,6 +205,14 @@ class BaseAvatar:
             self.tts.flush_talk()
         if hasattr(self, 'asr') and hasattr(self.asr, 'flush_talk'):
             self.asr.flush_talk()
+        with self.res_frame_queue.mutex:
+            self.res_frame_queue.queue.clear()
+        if (
+            hasattr(self, "output")
+            and getattr(self.output, "_player", None) is not None
+            and hasattr(self.output._player, "flush")
+        ):
+            self.output._player.flush()
         self.custom_audiotype = 0  
 
     # def flush(self):
@@ -225,6 +251,10 @@ class BaseAvatar:
 
     def notify(self, eventpoint:dict):
         if eventpoint and eventpoint.get('status'):
+            if eventpoint.get('status') == 'start':
+                self.runtime_metrics["request_active"] = True
+            elif eventpoint.get('status') in {'end', 'error', 'interrupted'}:
+                self.runtime_metrics["request_active"] = False
             logger.info("notify:%s", eventpoint)
             self.send_msg(json.dumps(eventpoint))
 
@@ -363,12 +393,49 @@ class BaseAvatar:
                     index = 0
                 t = time.perf_counter()
 
-                pred = self.inference_batch(index, audiofeat_batch)
+                try:
+                    pred = self.inference_batch(index, audiofeat_batch)
+                except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+                    if (
+                        not isinstance(exc, torch.cuda.OutOfMemoryError)
+                        and "out of memory" not in str(exc).lower()
+                    ):
+                        raise
+                    self.runtime_metrics["oom_count"] += 1
+                    self.runtime_metrics["request_active"] = False
+                    logger.error(
+                        "CUDA OOM recovered for session=%s; switch to 720p and retry",
+                        self.sessionid,
+                    )
+                    self.send_msg(json.dumps(
+                        {
+                            "type": "system",
+                            "status": "error",
+                            "message": "显存不足，当前任务已停止。请保持720P模式后重试。",
+                        },
+                        ensure_ascii=False,
+                    ))
+                    self.flush_talk()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    silence = np.zeros(self.chunk, dtype=np.float32)
+                    for _ in range(self.batch_size):
+                        silent_frames = [
+                            AudioFrameData(data=silence.copy(), type=1, userdata={}),
+                            AudioFrameData(data=silence.copy(), type=1, userdata={}),
+                        ]
+                        self.res_frame_queue.put(
+                            (None, silent_frames, mirror_index(length, index))
+                        )
+                        index += 1
+                    continue
 
                 counttime += (time.perf_counter() - t)
                 count += self.batch_size
                 if count >= 100:
-                    logger.info(f"------actual avg infer fps:{count/counttime:.4f}")
+                    inferfps = count / counttime
+                    self.runtime_metrics["inferfps"] = round(inferfps, 4)
+                    logger.info(f"------actual avg infer fps:{inferfps:.4f}")
                     count = 0
                     counttime = 0
                 for i, res_frame in enumerate(pred):
@@ -447,6 +514,15 @@ class BaseAvatar:
                     combine_frame = current_frame
 
             cv2.putText(combine_frame, "LiveTalking", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (128,128,128), 1)
+            if self.output_size and (
+                combine_frame.shape[1],
+                combine_frame.shape[0],
+            ) != self.output_size:
+                combine_frame = cv2.resize(
+                    combine_frame,
+                    self.output_size,
+                    interpolation=cv2.INTER_LINEAR,
+                )
             
             # 使用统一输出接口推送视频帧
             self.output.push_video_frame(combine_frame)
