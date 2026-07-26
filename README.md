@@ -210,13 +210,3 @@ python app.py --transport webrtc --model wav2lip --avatar_id wav2lip256_avatar1
 
 如果本项目对你有帮助，帮忙点个 Star。也欢迎感兴趣的朋友一起来完善该项目。
 
-| 社区 | 链接 |
-|------|------|
-| 知识星球 | <https://t.zsxq.com/7NMyO> |
-| 微信 | wxwubug (加群请备注) |
-| Telegram | <https://t.me/livetalking> |
-| Discord | <https://discord.gg/n5jSPCT3Uf> |
-| Email | lipku@foxmail.com |
-| 微信公众号 | 数字人技术 |
-
-<img src="./assets/qrcode-wechat.jpg" align="middle" />
