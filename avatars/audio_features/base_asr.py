@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 import torch.multiprocessing as mp
 
 from avatars.base_avatar import BaseAvatar,AudioFrameData
+from utils.queues import drain_queue
 
 
 class BaseASR:
@@ -48,8 +49,7 @@ class BaseASR:
         #self.warm_up()
 
     def flush_talk(self):
-        with self.queue.mutex:
-            self.queue.queue.clear()
+        drain_queue(self.queue)
 
     def put_audio_frame(self,audio_chunk:NDArray[np.float32],datainfo:dict): #16khz 20ms pcm
         self.queue.put(AudioFrameData(data=audio_chunk,type=0,userdata=datainfo))

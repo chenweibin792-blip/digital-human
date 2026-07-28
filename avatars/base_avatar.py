@@ -47,6 +47,7 @@ from fractions import Fraction
 
 from utils.logger import logger
 from utils.image import read_imgs,mirror_index
+from utils.queues import drain_queue
 
 # class State(Enum):
 #     INIT=0
@@ -88,6 +89,10 @@ class BaseAvatar:
             "start_total_seconds": 0.0,
             "oom_count": 0,
             "request_active": False,
+            "media_clock_rebases": 0,
+            "media_max_late_ms": 0.0,
+            "audio_queue_frames": 0,
+            "video_queue_frames": 0,
         }
         profile_sizes = {
             "source": None,
@@ -205,8 +210,7 @@ class BaseAvatar:
             self.tts.flush_talk()
         if hasattr(self, 'asr') and hasattr(self.asr, 'flush_talk'):
             self.asr.flush_talk()
-        with self.res_frame_queue.mutex:
-            self.res_frame_queue.queue.clear()
+        drain_queue(self.res_frame_queue)
         if (
             hasattr(self, "output")
             and getattr(self.output, "_player", None) is not None

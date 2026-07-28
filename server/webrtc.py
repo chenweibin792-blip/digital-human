@@ -27,6 +27,7 @@ from av.packet import Packet
 from av import AudioFrame
 import fractions
 import numpy as np
+from utils.queues import drain_queue
 
 AUDIO_PTIME = 0.020  # 20ms audio packetization
 VIDEO_CLOCK_RATE = 90000
@@ -71,42 +72,53 @@ class PlayerStreamTrack(MediaStreamTrack):
             raise Exception
 
         if self.kind == 'video':
-            if hasattr(self, "_timestamp"):
-                #self._timestamp = (time.time()-self._start) * VIDEO_CLOCK_RATE
-                self._timestamp += int(VIDEO_PTIME * VIDEO_CLOCK_RATE)
-                self.current_frame_count += 1
-                wait = self._start + self.current_frame_count * VIDEO_PTIME - time.time()
-                # wait = self.timelist[0] + len(self.timelist)*VIDEO_PTIME - time.time()               
-                if wait>0:
-                    await asyncio.sleep(wait)
-                # if len(self.timelist)>=100:
-                #     self.timelist.pop(0)
-                # self.timelist.append(time.time())
-            else:
-                self._start = time.time()
-                self._timestamp = 0
-                self.timelist.append(self._start)
-                mylogger.info('video start:%f',self._start)
-            return self._timestamp, VIDEO_TIME_BASE
-        else: #audio
-            if hasattr(self, "_timestamp"):
-                #self._timestamp = (time.time()-self._start) * SAMPLE_RATE
-                self._timestamp += int(AUDIO_PTIME * SAMPLE_RATE)
-                self.current_frame_count += 1
-                wait = self._start + self.current_frame_count * AUDIO_PTIME - time.time()
-                # wait = self.timelist[0] + len(self.timelist)*AUDIO_PTIME - time.time()
-                if wait>0:
-                    await asyncio.sleep(wait)
-                # if len(self.timelist)>=200:
-                #     self.timelist.pop(0)
-                #     self.timelist.pop(0)
-                # self.timelist.append(time.time())
-            else:
-                self._start = time.time()
-                self._timestamp = 0
-                self.timelist.append(self._start)
-                mylogger.info('audio start:%f',self._start)
-            return self._timestamp, AUDIO_TIME_BASE
+            packet_time = VIDEO_PTIME
+            clock_rate = VIDEO_CLOCK_RATE
+            time_base = VIDEO_TIME_BASE
+        else:
+            packet_time = AUDIO_PTIME
+            clock_rate = SAMPLE_RATE
+            time_base = AUDIO_TIME_BASE
+
+        now = time.perf_counter()
+        if not hasattr(self, "_timestamp"):
+            self._start = now
+            self._timestamp = 0
+            self.timelist.append(self._start)
+            mylogger.info("%s media clock started", self.kind)
+            return self._timestamp, time_base
+
+        self._timestamp += int(packet_time * clock_rate)
+        self.current_frame_count += 1
+        deadline = self._start + self.current_frame_count * packet_time
+        wait = deadline - now
+
+        # A queue starvation or interruption can leave the schedule far behind.
+        # Preserve monotonic PTS, but rebase wall pacing so queued frames are not
+        # emitted in a burst while trying to catch up.
+        late_seconds = max(0.0, -wait)
+        if late_seconds > packet_time * 2:
+            self._start = now - self.current_frame_count * packet_time
+            wait = 0.0
+            self._player.set_metric(
+                "media_clock_rebases",
+                self._player.get_metric("media_clock_rebases", 0) + 1,
+            )
+            mylogger.debug(
+                "%s media clock rebased after %.1f ms starvation",
+                self.kind,
+                late_seconds * 1000,
+            )
+        self._player.set_metric(
+            "media_max_late_ms",
+            max(
+                self._player.get_metric("media_max_late_ms", 0.0),
+                round(late_seconds * 1000, 3),
+            ),
+        )
+        if wait > 0:
+            await asyncio.sleep(wait)
+        return self._timestamp, time_base
 
     async def recv(self) -> Union[Frame, Packet]:
         # frame = self.frames[self.counter % 30]            
@@ -151,14 +163,16 @@ class PlayerStreamTrack(MediaStreamTrack):
                 mylogger.info(f"------actual avg final fps:{finalfps:.4f}")
                 self.framecount = 0
                 self.totaltime=0
+        if self._player is not None:
+            self._player.set_metric(
+                f"{self.kind}_queue_frames", self._queue.qsize()
+            )
         return frame
     
     def stop(self):
         super().stop()
         # Drain & delete remaining frames
-        while not self._queue.empty():
-            item = self._queue.get_nowait()
-            del item
+        drain_queue(self._queue)
         if self._player is not None:
             self._player._stop(self)
             self._player = None
@@ -207,8 +221,7 @@ class HumanPlayer:
     def flush(self):
         """Drop already buffered media while keeping both WebRTC tracks live."""
         for track in (self.__audio, self.__video):
-            with track._queue.mutex:
-                track._queue.queue.clear()
+            drain_queue(track._queue)
 
     def notify(self,eventpoint):
         if self.__container is not None:
@@ -217,6 +230,11 @@ class HumanPlayer:
     def set_metric(self, name, value):
         if self.__container is not None and hasattr(self.__container, "runtime_metrics"):
             self.__container.runtime_metrics[name] = value
+
+    def get_metric(self, name, default=None):
+        if self.__container is not None and hasattr(self.__container, "runtime_metrics"):
+            return self.__container.runtime_metrics.get(name, default)
+        return default
 
     @property
     def audio(self) -> MediaStreamTrack:

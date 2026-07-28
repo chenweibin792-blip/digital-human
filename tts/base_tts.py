@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from avatars.base_avatar import BaseAvatar
 
 from utils.logger import logger
+from utils.queues import drain_queue
 
 class State(Enum):
     RUNNING = 0
@@ -29,8 +30,7 @@ class BaseTTS:
 
     def flush_talk(self):
         self.state = State.PAUSE
-        with self.msgqueue.mutex:
-            self.msgqueue.queue.clear()
+        drain_queue(self.msgqueue)
 
     def put_msg_txt(self, msg: str, datainfo: dict = {}): 
         if len(msg) > 0:
